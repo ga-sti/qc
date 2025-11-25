@@ -1,6 +1,7 @@
 from __future__ import annotations
 from pathlib import Path
 import tkinter as tk
+import sys  
 from tkinter import PhotoImage, messagebox
 import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
@@ -228,18 +229,33 @@ class QCForm(ttk.Window):
         return body
 
     def _toggle_row(self, parent, label: str, varname: str, row: int):
-        """Fila con etiqueta + toggle Sí/No (devuelve ttk.StringVar en self.<varname>)."""
-        setattr(self, varname, ttk.StringVar(value="No"))
-        ttk.Label(parent, text=label, style="Field.TLabel").grid(row=row, column=0, sticky="w", padx=8, pady=8)
+        """
+        Crea una fila con etiqueta + toggle Sí/No.
+        Devuelve el Checkbutton y le cuelga la Label en .label_widget
+        para poder cambiar el texto u ocultarla después.
+        """
+        var = ttk.StringVar(value="No")
+        setattr(self, varname, var)
+
+        lbl = ttk.Label(parent, text=label, style="Field.TLabel")
+        lbl.grid(row=row, column=0, sticky="w", padx=8, pady=8)
+
         chk = ttk.Checkbutton(
-            parent, variable=getattr(self, varname),
-            onvalue="Sí", offvalue="No", bootstyle="warning-round-toggle"
+            parent,
+            variable=var,
+            onvalue="Sí",
+            offvalue="No",
+            bootstyle="warning-round-toggle",
         )
         chk.grid(row=row, column=1, sticky="w", padx=8, pady=8)
+
         try:
             chk.configure(cursor="hand2")
         except Exception:
             pass
+
+        # guardamos la label enganchada al check
+        chk.label_widget = lbl
         return chk
 
     # ---------- UI ----------
@@ -279,6 +295,7 @@ class QCForm(ttk.Window):
         self._tab_hw(tab_hw)
         self._tab_sw(tab_sw)
         self._tab_sellos(tab_sellos)
+        self._on_tipo_change()
 
         # Botonera
         bar = ttk.Frame(self)
@@ -305,12 +322,12 @@ class QCForm(ttk.Window):
         self.tipo_var = ttk.StringVar(value="PC")
         rb_pc = ttk.Radiobutton(
             body, text="🖥️  PC", variable=self.tipo_var, value="PC",
-            style="AT.TRadiobutton", bootstyle="warning-toolbutton"
+            style="AT.TRadiobutton", bootstyle="warning-toolbutton",command=self._on_tipo_change, 
         )
         rb_pc.grid(row=0, column=0, sticky="w", padx=6, pady=8)
         rb_lap = ttk.Radiobutton(
             body, text="💻  Laptop", variable=self.tipo_var, value="LAP",
-            style="AT.TRadiobutton", bootstyle="warning-toolbutton"
+            style="AT.TRadiobutton", bootstyle="warning-toolbutton",command=self._on_tipo_change,
         )
         rb_lap.grid(row=0, column=1, sticky="w", padx=6, pady=8)
         for rb in (rb_pc, rb_lap):
@@ -337,20 +354,35 @@ class QCForm(ttk.Window):
     def _tab_hw(self, parent):
         g = self._card(parent, "Hardware")
 
-        ttk.Label(g, text="🔌 Puertos USB:", style="Field.TLabel").grid(row=0, column=0, sticky="w", padx=8, pady=8)
+        ttk.Label(g, text="🔌 Puertos USB:", style="Field.TLabel").grid(
+            row=0, column=0, sticky="w", padx=8, pady=8
+        )
         self.entry_usb = ttk.Spinbox(g, from_=0, to=20, width=6)
         self.entry_usb.insert(0, "0")
         self.entry_usb.grid(row=0, column=1, sticky="w", padx=8, pady=8)
         Tooltip(self.entry_usb, "Cantidad de puertos USB visibles (frente/trasera)")
 
-        t1 = self._toggle_row(g, "💿 Lectora DVD:", "dvd_var", 1)
-        t2 = self._toggle_row(g, "🔌 Cable de poder:", "cable_var", 2)
-        t3 = self._toggle_row(g, "📺 HDMI:", "hdmi_var", 3)
-        t4 = self._toggle_row(g, "🌐 RJ45:", "rj45_var", 4)
-        for t in (t1, t2, t3, t4):
+        # toggles
+        self.chk_dvd = self._toggle_row(g, "💿 Lectora DVD:", "dvd_var", 1)
+        self.chk_cable = self._toggle_row(g, "🔌 Cable de poder:", "cable_var", 2)
+        self.chk_hdmi = self._toggle_row(g, "📺 HDMI:", "hdmi_var", 3)
+        self.chk_rj45 = self._toggle_row(g, "🌐 RJ45:", "rj45_var", 4)
+        # solo aplican a Laptop (los vamos a ocultar en PC)
+        self.chk_teclado = self._toggle_row(g, "⌨️ Teclado (testear):", "teclado_var", 5)
+        self.chk_webcam = self._toggle_row(g, "📷 Webcam:", "webcam_var", 6)
+
+        for t in (
+            self.chk_dvd,
+            self.chk_cable,
+            self.chk_hdmi,
+            self.chk_rj45,
+            self.chk_teclado,
+            self.chk_webcam,
+        ):
             Tooltip(t, "Alterná entre Sí / No")
 
         g.columnconfigure(1, weight=1)
+
 
     def _tab_sw(self, parent):
         g = self._card(parent, "Software")
@@ -369,6 +401,71 @@ class QCForm(ttk.Window):
         for t in (t1, t2, t3, t4):
             Tooltip(t, "Alterná entre Sí / No")
         g.columnconfigure(1, weight=1)
+    
+    def _on_tipo_change(self):
+        """Se llama al cambiar entre PC / Laptop."""
+        tipo = self.tipo_var.get()
+
+        # Cambiar texto Cable de poder ↔ Cargador
+        if hasattr(self, "chk_cable"):
+            lbl = getattr(self.chk_cable, "label_widget", None)
+            if lbl is not None:
+                if tipo == "LAP":
+                    lbl.configure(text="🔌 Cargador:")
+                else:
+                    lbl.configure(text="🔌 Cable de poder:")
+
+        # Teclado / Webcam: solo visibles en Laptop
+        for nombre_chk, nombre_var in (("chk_teclado", "teclado_var"), ("chk_webcam", "webcam_var")):
+            chk = getattr(self, nombre_chk, None)
+            var = getattr(self, nombre_var, None)
+            if chk is None or var is None:
+                continue
+            lbl = getattr(chk, "label_widget", None)
+            if tipo == "LAP":
+                # mostrar
+                if lbl is not None:
+                    lbl.grid()
+                chk.grid()
+            else:
+                # ocultar y resetear a "No"
+                if lbl is not None:
+                    lbl.grid_remove()
+                chk.grid_remove()
+                var.set("No")
+
+
+    def _update_tipo_equipo_ui(self):
+        """Ajusta texto de Cable/Cargador y visibilidad de Teclado/Webcam según tipo."""
+        tipo = self.tipo_var.get()
+
+        meta = getattr(self, "_toggle_meta", {})
+
+        # 🔌 Cable de poder ↔ Cargador
+        cab = meta.get("cable_var")
+        if cab:
+            lbl = cab["label"]
+            if tipo == "LAP":
+                lbl.configure(text="🔌 Cargador:")
+            else:
+                lbl.configure(text="🔌 Cable de poder:")
+
+        # ⌨️ / 📷 Teclado + Webcam: solo visibles en Laptop
+        for name in ("teclado_var", "webcam_var"):
+            m = meta.get(name)
+            if not m:
+                continue
+            lbl = m["label"]
+            chk = m["check"]
+            if tipo == "LAP":
+                # volver a mostrar (usan el grid original)
+                lbl.grid()
+                chk.grid()
+            else:
+                # ocultar en PC
+                lbl.grid_remove()
+                chk.grid_remove()
+                getattr(self, name).set("No")
 
     # ======== Validación & acciones ========
     def _validate(self) -> bool:
@@ -408,15 +505,33 @@ class QCForm(ttk.Window):
 def obtener_datos_formulario():
     app = QCForm()
     app.mainloop()
+
+    # 👉 Si se canceló (botón Cancelar o cerrar ventana), terminar el programa
+    try:
+        tipo = app.tipo_var.get()
+    except Exception:
+        tipo = "CANCEL"
+
+    if tipo == "CANCEL":
+        try:
+            app.destroy()
+        except Exception:
+            pass
+        # Sale del proceso completo: no se ejecuta el pipeline ni la barra de carga
+        sys.exit(0)
+
+    # Si no se canceló, armamos el diccionario con los datos del formulario
     data = {
         "Tipo de equipo": app.tipo_var.get(),
         "QC realizado por": _safe_get(app.entry_qc),
         "Cliente": _safe_get(app.entry_cliente),
         "Puertos USB": _safe_get(app.entry_usb),
         "Lectora DVD": app.dvd_var.get(),
-        "Cable de poder": app.cable_var.get(),
+        "Cable de poder": app.cable_var.get(),     # la etiqueta visual ya cambia a Cargador
         "HDMI": app.hdmi_var.get(),
         "RJ45": app.rj45_var.get(),
+        "Teclado (Testear)": getattr(app, "teclado_var", ttk.StringVar(value="No")).get(),
+        "Webcam": getattr(app, "webcam_var", ttk.StringVar(value="No")).get(),
         "Drivers OK": app.drivers_var.get(),
         "WiFi funcionando": app.wifi_var.get(),
         "AT Service": app.atservice_var.get(),

@@ -18,7 +18,6 @@ def run_pipeline() -> None:
     # 1) UI principal
     form_path = run_gui()
 
-
     # Cancelación: si el usuario cerró la UI, no seguimos ni abrimos la progress bar
     if not form_path:
         print('[i] Operación cancelada por el usuario. No se ejecuta el pipeline.')

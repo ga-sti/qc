@@ -4,8 +4,23 @@ import psutil
 import platform
 import wmi
 import socket
-
 from config import INFO_TXT
+
+# Conexión WMI y cachés globales para evitar llamadas pesadas repetidas
+_wmi = None
+_so_activado_cache = None
+_info_detallada_cache = None
+
+
+def _get_wmi():
+    """Devuelve una instancia compartida de WMI para root\\cimv2."""
+    global _wmi
+    if _wmi is None:
+        try:
+            _wmi = wmi.WMI(moniker=r"winmgmts:\\\\.\\root\\cimv2")
+        except Exception:
+            _wmi = wmi.WMI()
+    return _wmi
 
 # =========================
 # Detectar Office preciso
@@ -106,53 +121,60 @@ def detectar_motherboard():
 # =========================
 # Detectar sistema operativo
 # =========================
-def detectar_so_activado():
+def detectar_so_activado(force: bool = False):
+    """
+    Detecta si el sistema operativo Windows está activado.
+
+    Devuelve:
+        (so_edition: str | None, activado: bool | None)
+
+    Usa WMI filtrando solo los productos de Windows con clave parcial
+    y cachea el resultado para no repetir una consulta pesada.
+    """
+    global _so_activado_cache
+
+    # Si ya lo calculamos y no nos piden forzar, devolvemos la caché
+    if _so_activado_cache is not None and not force:
+        return _so_activado_cache
+
     try:
-        c = wmi.WMI(namespace=r"root\CIMV2")
-        os_info = c.Win32_OperatingSystem()[0]
-        so_edition = (os_info.Caption or "").strip()
-        if so_edition.upper().startswith("MICROSOFT "):
-            so_edition = so_edition[10:]
+        c = _get_wmi()
 
-        GUID_WINDOWS = "55c92734-d682-4d71-983e-d6ec3f16059f"
-        prods = c.SoftwareLicensingProduct(ApplicationID=GUID_WINDOWS)
+        # Obtener edición de Windows
+        os_list = c.Win32_OperatingSystem()
+        if os_list:
+            os_info = os_list[0]
+            so_edition = getattr(os_info, "Caption", "Unknown")
+        else:
+            so_edition = "Unknown"
 
-        activated = False
-        if prods:
-            def is_windows(p):
-                name = ((getattr(p, "Name", "") or "") + " " +
-                        (getattr(p, "Description", "") or "")).upper()
-                return "WINDOWS" in name
+        # Filtrar solo productos de Windows con clave parcial y que sean Windows
+        query = (
+            "SELECT LicenseStatus, Name "
+            "FROM SoftwareLicensingProduct "
+            "WHERE PartialProductKey IS NOT NULL "
+            "AND Name LIKE '%Windows%'"
+        )
 
-            def score(p):
-                s = 0
-                if getattr(p, "LicenseStatus", 0) == 1:
-                    s += 10
-                if is_windows(p):
-                    s += 3
-                if getattr(p, "PartialProductKey", None):
-                    s += 2
-                if getattr(p, "ProductKeyID", None):
-                    s += 1
-                return s
+        activado = False
+        for prod in c.query(query):
+            # LicenseStatus: 1 = Licensed
+            if getattr(prod, "LicenseStatus", 0) == 1:
+                activado = True
+                break
 
-            best = max(prods, key=score)
-            activated = (getattr(best, "LicenseStatus", 0) == 1)
-
-            if not activated:
-                activated = any(
-                    getattr(p, "LicenseStatus", 0) == 1 and is_windows(p)
-                    for p in prods
-                )
-
-        return so_edition, activated
+        _so_activado_cache = (so_edition, activado)
+        return _so_activado_cache
 
     except Exception:
+        # En caso de error, no bloquee todo el QC
         try:
-            return f"{platform.system()} {platform.release()}", False
+            fallback = (f"{platform.system()} {platform.release()}", None)
         except Exception:
-            return "Windows", False
+            fallback = ("Windows", None)
 
+        _so_activado_cache = fallback
+        return fallback
 
 # =========================
 # Detectar software instalado
@@ -237,11 +259,26 @@ def detectar_endpoint_central():
 # =========================
 # Obtener información detallada
 # =========================
-def obtener_info_detallada():
-    c = wmi.WMI()
+def obtener_info_detallada(force: bool = False):
+    """
+    Devuelve info detallada de hardware/software del equipo.
+
+    Usa WMI compartido y cachea el resultado completo para evitar
+    recalcular todo cada vez. Usar `force=True` para forzar refresco.
+    """
+    global _info_detallada_cache
+
+    # Si ya calculamos y no se pide forzar, devolvemos cacheado
+    if _info_detallada_cache is not None and not force:
+        return _info_detallada_cache
+
+    c = _get_wmi()
+
+    # CPU
     cpu_info = c.Win32_Processor()[0]
     cpu_nombre = cpu_info.Name.strip()
 
+    # RAM
     ram_modules = c.Win32_PhysicalMemory()
     ram_total = sum([int(r.Capacity) for r in ram_modules])
     ram_slots = len(ram_modules)
@@ -251,6 +288,7 @@ def obtener_info_detallada():
     }
     ram_tipo = TIPOS_RAM.get(ram_modules[0].MemoryType, "Desconocido") if ram_modules else "Desconocido"
 
+    # Disco total
     discos = psutil.disk_partitions()
     disco_total = 0
     for d in discos:
@@ -259,12 +297,14 @@ def obtener_info_detallada():
         try:
             uso = psutil.disk_usage(d.mountpoint)
             disco_total += uso.total
-        except:
+        except Exception:
             continue
 
+    # GPU
     gpus = c.Win32_VideoController()
     gpu_info = [gpu.Name for gpu in gpus] if gpus else ["No detectada"]
 
+    # Diccionario base
     info = {
         "CPU": cpu_nombre,
         "RAM Total (GB)": round(ram_total / (1024**3), 2),
@@ -274,6 +314,7 @@ def obtener_info_detallada():
         "GPU(s)": gpu_info
     }
 
+    # Software / SO / dominio / mother
     info["Office"] = detectar_office_preciso()
     info.update(detectar_software())
     info["Antivirus"] = detectar_antivirus()
@@ -283,6 +324,9 @@ def obtener_info_detallada():
     info["MOTHER"] = detectar_motherboard()
 
     print(f"🔍 Motherboard rápida: {info['MOTHER']!r}")
+
+    # Guardamos en caché antes de devolver
+    _info_detallada_cache = info
     return info
 
 

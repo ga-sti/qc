@@ -149,7 +149,7 @@ def normalize_label(s: str) -> str:
     nk = unicodedata.normalize('NFKD', s)
     no_acc = "".join(c for c in nk if not unicodedata.combining(c))
     up = no_acc.upper()
-    for ch in " ./-():": 
+    for ch in " ./-():":
         up = up.replace(ch, "")
     return up
 
@@ -158,12 +158,16 @@ NORMALIZED_MAP = {
     for orig, key in FIELD_MAP.items()
 }
 
+for _internal in set(FIELD_MAP.values()):
+    NORMALIZED_MAP.setdefault(normalize_label(_internal), _internal)
+    
 def guardar_en_excel(datos_form, datos_sist, es_pc=True, output_path=None):
     plantilla = PLANTILLA_PC if es_pc else PLANTILLA_LAPTOP
     wb = load_workbook(plantilla)
     ws = wb.active
     coordmap = MAP_PC if es_pc else MAP_LAPTOP
 
+    # 1) Traducir etiquetas de ambos diccionarios a claves internas
     raw = {**datos_form, **datos_sist}
     trad = {}
     for label, val in raw.items():
@@ -173,25 +177,49 @@ def guardar_en_excel(datos_form, datos_sist, es_pc=True, output_path=None):
         elif normalize_label(label) not in ("TIPODEEQUIPO",):
             print(f"⚠️ Etiqueta NO mapeada: '{label}'")
 
+    # 2) Fecha / hora siempre se genera al momento de crear el Excel
     trad["fecha_hora"] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
 
+    # 3) Armar memoria RAM unificada
     if "ram_total_gb" in trad:
-        parts = [f"{trad.pop('ram_total_gb')} GB"]
+        parts = []
+
+        # Cantidad de RAM
+        total = trad.pop("ram_total_gb")
+        parts.append(f"{total} GB")
+
+        # Slots usados (con singular/plural)
         if "ram_slots_usados" in trad:
-            parts.append(f"{trad.pop('ram_slots_usados')} slots")
+            slots = trad.pop("ram_slots_usados")
+            try:
+                n = int(slots)
+                suf = "slot" if n == 1 else "slots"
+                parts.append(f"{n} {suf}")
+            except Exception:
+                # Si no es número, lo ponemos tal cual
+                if slots:
+                    parts.append(f"{slots} slots")
+
+        # Tipo de RAM: solo si viene con un valor real (DDR4, etc.)
         if "tipo_de_ram" in trad:
-            parts.append(trad.pop("tipo_de_ram"))
+            tipo = str(trad.pop("tipo_de_ram") or "").strip()
+            if tipo and tipo.lower() not in ("desconocido", "unknown", "na", "n/a"):
+                parts.append(tipo)
+
         trad["memoria_ram"] = " – ".join(parts)
 
+
+    # 4) Disco total → DISCO DURO 1
     if "disco_total_gb" in trad:
         trad["disco_duro_1"] = f"{trad.pop('disco_total_gb')} GB"
 
+    # 5) Volcar al Excel según el mapeo
     for key, (col, row) in coordmap.items():
         if key not in trad:
             continue
         val = trad[key]
 
-        # Manejo de campos especiales
+        # --- MOTHER: texto + SI/NO ---
         if key == "mother":
             model = (val or "").strip()
             si_col = chr(ord(col) + 1)
@@ -201,6 +229,7 @@ def guardar_en_excel(datos_form, datos_sist, es_pc=True, output_path=None):
             ws[f"{no_col}{row}"] = "" if model else "X"
             continue
 
+        # --- DISCO DURO 2: lista o string + SI/NO ---
         if key == "disco_duro_2":
             txt = ", ".join(val) if isinstance(val, list) else (val or "")
             ws[f"{col}{row}"] = txt
@@ -210,6 +239,7 @@ def guardar_en_excel(datos_form, datos_sist, es_pc=True, output_path=None):
             ws[f"{no_col}{row}"] = "" if txt else "X"
             continue
 
+        # --- CPU / GPU / MEMORIA / DISCO1 / USB: texto + SI ---
         if key in ("cpu", "gpu", "memoria_ram", "disco_duro_1", "usb"):
             txt = ", ".join(val) if isinstance(val, list) else val
             ws[f"{col}{row}"] = txt
@@ -217,24 +247,27 @@ def guardar_en_excel(datos_form, datos_sist, es_pc=True, output_path=None):
             ws[f"{si_col}{row}"] = "X" if txt else ""
             continue
 
-        if key in ("cd_dvd_rw","cable_de_poder","teclado","webcam","hdmi","rj45"):
-            si, no = chr(ord(col)+1), chr(ord(col)+2)
-            if isinstance(val,str) and val.lower().startswith("s"):
+        # --- Campos de hardware con SI/NO ---
+        if key in ("cd_dvd_rw", "cable_de_poder", "teclado", "webcam", "hdmi", "rj45"):
+            si, no = chr(ord(col) + 1), chr(ord(col) + 2)
+            if isinstance(val, str) and val.lower().startswith("s"):
                 ws[f"{si}{row}"] = "X"
             else:
                 ws[f"{no}{row}"] = "X"
             continue
 
-        if key in ("sello_at_service","micro_intel_amd","sello_garantia","coa_windows"):
-            si, no = "H","I"
-            if isinstance(val,str) and val.lower().startswith("s"):
+        # --- Sellos (SI en H, NO en I) ---
+        if key in ("sello_at_service", "micro_intel_amd", "sello_garantia", "coa_windows"):
+            si, no = "H", "I"
+            if isinstance(val, str) and val.lower().startswith("s"):
                 ws[f"{si}{row}"] = "X"
             else:
                 ws[f"{no}{row}"] = "X"
             continue
 
+        # --- Dominio: texto + SI/NO ---
         if key == "dominio":
-            si_col, no_col = chr(ord(col)+1), chr(ord(col)+2)
+            si_col, no_col = chr(ord(col) + 1), chr(ord(col) + 2)
             dominio = (trad.get("dominio") or "").strip()
             if dominio:
                 ws[f"{col}{row}"] = dominio
@@ -244,8 +277,11 @@ def guardar_en_excel(datos_form, datos_sist, es_pc=True, output_path=None):
                 ws[f"{no_col}{row}"] = "X"
             continue
 
-        if key in ("drivers","wifi","endpoint","adobe_reader","teamviewer","7zip","forti_vpn","chrome","java","antivirus"):
-            si_col, no_col = chr(ord(col)+1), chr(ord(col)+2)
+        # --- Software con SI/NO y posible texto ---
+        if key in ("drivers", "wifi", "endpoint", "adobe_reader",
+                   "teamviewer", "7zip", "forti_vpn", "chrome",
+                   "java", "antivirus"):
+            si_col, no_col = chr(ord(col) + 1), chr(ord(col) + 2)
             if isinstance(val, bool):
                 ws[f"{si_col}{row}"] = "X" if val else ""
                 ws[f"{no_col}{row}"] = "" if val else "X"
@@ -261,8 +297,9 @@ def guardar_en_excel(datos_form, datos_sist, es_pc=True, output_path=None):
                 ws[f"{si_col}{row}"] = "X"
             continue
 
+        # --- Office: versión + SI/NO ---
         if key == "office":
-            si, no = chr(ord(col)+1), chr(ord(col)+2)
+            si, no = chr(ord(col) + 1), chr(ord(col) + 2)
             if val:
                 ws[f"{col}{row}"] = val
                 ws[f"{si}{row}"] = "X"
@@ -270,8 +307,9 @@ def guardar_en_excel(datos_form, datos_sist, es_pc=True, output_path=None):
                 ws[f"{no}{row}"] = "X"
             continue
 
+        # --- Sistema operativo: versión + SI/NO activación ---
         if key == "s_operativo":
-            si_col, no_col = chr(ord(col)+1), chr(ord(col)+2)
+            si_col, no_col = chr(ord(col) + 1), chr(ord(col) + 2)
             version, activated = ("", False)
             if isinstance(val, tuple) and len(val) == 2:
                 version, activated = val
@@ -284,11 +322,39 @@ def guardar_en_excel(datos_form, datos_sist, es_pc=True, output_path=None):
             ws[f"{si_col}{row}"] = "X" if activated else ""
             ws[f"{no_col}{row}"] = "" if activated else "X"
             continue
-
+        
+        # 🚩 CUALQUIER OTRO (fecha_hora, realizado_por, cliente, etc.)
+        ws[f"{col}{row}"] = val
     # Guardar archivo
     if not output_path:
         host = socket.gethostname()
         ts   = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_path = os.path.join(r"C:\QC_Auto", f"{host}_{ts}.xlsx")
+
+        # 1) Intentar usar la unidad donde está el script (pendrive)
+        drive, _ = os.path.splitdrive(BASE_DIR)
+        drive = drive.upper()
+
+        if drive and drive != "C:":
+            # Ej: E:\QC_Auto
+            base_dest = os.path.join(drive + os.sep, "QC_Auto")
+        # 2) Si no, intentar D:\ (muy típico de pendrive)
+        elif os.path.exists(r"D:\\"):
+            base_dest = os.path.join(r"D:\\", "QC_Auto")
+        # 3) Último recurso: C:\QC_Auto
+        else:
+            base_dest = r"C:\QC_Auto"
+
+        os.makedirs(base_dest, exist_ok=True)
+        output_path = os.path.join(base_dest, f"{host}_{ts}.xlsx")
+    else:
+        # Si te pasan un output_path específico, respetalo
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+    wb.save(output_path)
+    return output_path
+
+    # Asegurar que exista la carpeta destino
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
     wb.save(output_path)
     return output_path
