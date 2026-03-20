@@ -1,0 +1,35 @@
+=== NUEVO CRASH DE PYTHON ===
+Traceback (most recent call last):
+  File "c:\Users\gdelgado\Documents\GitHub\qc\src\interfaz.py", line 508, in _on_submit
+    self.callback_generar(datos)
+    ~~~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "c:\Users\gdelgado\Documents\GitHub\qc\src\pipeline.py", line 73, in iniciar_proceso_tecnico
+    progreso.mainloop()
+    ^^^^^^^^^^^^^^^^^
+AttributeError: 'ProgressUI' object has no attribute 'mainloop'
+
+
+=== NUEVO CRASH DE PYTHON ===
+Traceback (most recent call last):
+  File "c:\Users\gdelgado\Documents\GitHub\qc\src\interfaz.py", line 91, in done
+    self.senal_fin.emit(text, titulo_popup, mensaje_popup)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: ProgressUI.senal_fin[str, str, str].emit(): argument 1 has unexpected type 'int'
+
+
+=== NUEVO CRASH DE PYTHON ===
+Traceback (most recent call last):
+  File "c:\Users\gdelgado\Documents\GitHub\qc\src\interfaz.py", line 91, in done
+    self.senal_fin.emit(text, titulo_popup, mensaje_popup)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: ProgressUI.senal_fin[str, str, str].emit(): argument 1 has unexpected type 'int'
+
+
+=== NUEVO CRASH DE PYTHON ===
+Traceback (most recent call last):
+  File "c:\Users\gdelgado\Documents\GitHub\qc\src\interfaz.py", line 95, in done
+    self.senal_fin.emit(text, titulo_popup, mensaje_popup)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: ProgressUI.senal_fin[str, str, str].emit(): argument 1 has unexpected type 'int'
+
+
